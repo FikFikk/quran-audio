@@ -1,0 +1,22 @@
+﻿# Berkas media biner dicegah masuk ke riwayat git (unggah hanya ke GitHub Releases)
+*.mp3
+*.wav
+*.aac
+*.ogg
+*.flac
+*.m4a
+*.zip
+*.tar.gz
+
+# Sistem Operasi & Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+.idea/
+.vscode/
+
+# Berkas sementara dan log
+*.log
+tmp/
+temp/
