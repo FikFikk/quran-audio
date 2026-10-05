@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Mengunduh 114 surah MP3 Syeikh Yasser Al-Dosari dan langsung mengunggahnya ke GitHub Releases.
 #>
@@ -29,16 +29,26 @@ $headers = @{
     "User-Agent" = "QuranAudio-Sync"
 }
 
+# Menonaktifkan progress stream bawaan PowerShell agar unduhan berjalan maksimal tanpa bottleneck
+$ProgressPreference = 'SilentlyContinue'
+
 Write-Host "Mengambil informasi rilis tag '$Tag'..." -ForegroundColor Cyan
-$release = Invoke-RestMethod -Uri "$apiBase/releases/tags/$Tag" -Method Get -Headers $headers
+$release = Invoke-RestMethod -Uri "$apiBase/releases/tags/$Tag" -Method Get -Headers $headers -TimeoutSec 60
 $uploadUrlTemplate = $release.upload_url -replace '\{\?name,label\}', ''
 
+# Mengambil seluruh daftar aset yang sudah terunggah dengan menangani paginasi GitHub API (maksimal 100 per halaman)
 $existingAssets = @{}
-if ($release.assets) {
-    foreach ($asset in $release.assets) {
-        $existingAssets[$asset.name] = $asset.id
+$page = 1
+do {
+    $assetsUri = "$apiBase/releases/$($release.id)/assets?per_page=100&page=$page"
+    $pageAssets = Invoke-RestMethod -Uri $assetsUri -Method Get -Headers $headers -TimeoutSec 60
+    if ($pageAssets) {
+        foreach ($asset in $pageAssets) {
+            $existingAssets[$asset.name] = $asset.id
+        }
+        $page++
     }
-}
+} while ($pageAssets -and $pageAssets.Count -eq 100)
 
 $tempFolder = Join-Path $env:TEMP "quran_audio_sync"
 if (-not (Test-Path $tempFolder)) {
@@ -48,8 +58,8 @@ if (-not (Test-Path $tempFolder)) {
 Write-Host "Memulai proses sinkronisasi 114 Surah ke GitHub Releases ($Tag)..." -ForegroundColor Green
 
 for ($i = 1; $i -le 114; $i++) {
-    $surahStr = String $i
-    $surahStr = $surahStr.PadLeft(3, '0')
+    # Format nomor surah menjadi 3 digit (contoh: 001, 002, dst.)
+    $surahStr = "{0:D3}" -f $i
     $fileName = "$surahStr.mp3"
 
     if ($existingAssets.ContainsKey($fileName)) {
@@ -62,7 +72,7 @@ for ($i = 1; $i -le 114; $i++) {
 
     Write-Host "[$i/114] Mengunduh $fileName dari sumber CDN..." -ForegroundColor White
     try {
-        Invoke-WebRequest -Uri $sourceUrl -OutFile $localFile -ErrorAction Stop
+        Invoke-WebRequest -Uri $sourceUrl -OutFile $localFile -TimeoutSec 600 -ErrorAction Stop
     } catch {
         Write-Warning "Gagal mengunduh $fileName : $($_.Exception.Message)"
         continue
@@ -78,7 +88,7 @@ for ($i = 1; $i -le 114; $i++) {
     }
 
     try {
-        $res = Invoke-RestMethod -Uri $uploadUri -Method Post -Headers $uploadHeaders -Body $fileBytes -ErrorAction Stop
+        $res = Invoke-RestMethod -Uri $uploadUri -Method Post -Headers $uploadHeaders -Body $fileBytes -TimeoutSec 600 -ErrorAction Stop
         Write-Host "       Berhasil: $fileName terunggah!" -ForegroundColor Green
     } catch {
         Write-Warning "Gagal mengunggah $fileName : $($_.Exception.Message)"

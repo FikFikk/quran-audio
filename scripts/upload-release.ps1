@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Skrip otomatis untuk mengunggah 114 berkas MP3 murottal ke GitHub Releases.
 
@@ -18,7 +18,7 @@ param (
     [string]$AudioFolder,
 
     [Parameter(Mandatory = $false)]
-    [string]$Tag = "v1.0.0",
+    [string]$Tag = "1.0.0",
 
     [Parameter(Mandatory = $false)]
     [string]$ReleaseTitle = "Murottal Syeikh Yasser Al-Dosari 114 Surah"
@@ -26,6 +26,9 @@ param (
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Menonaktifkan progress stream bawaan PowerShell agar proses unggah lebih stabil
+$ProgressPreference = 'SilentlyContinue'
 
 if (-not (Test-Path $AudioFolder)) {
     Write-Error "Direktori audio tidak ditemukan: $AudioFolder"
@@ -54,7 +57,7 @@ $headers = @{
 Write-Host "Memeriksa rilis tag '$Tag' di GitHub..." -ForegroundColor Cyan
 $release = $null
 try {
-    $release = Invoke-RestMethod -Uri "$apiBase/releases/tags/$Tag" -Method Get -Headers $headers -ErrorAction Stop
+    $release = Invoke-RestMethod -Uri "$apiBase/releases/tags/$Tag" -Method Get -Headers $headers -TimeoutSec 60 -ErrorAction Stop
     Write-Host "Rilis '$Tag' sudah ada (ID: $($release.id))." -ForegroundColor Green
 } catch {
     Write-Host "Rilis belum ada. Membuat rilis baru '$Tag'..." -ForegroundColor Yellow
@@ -66,20 +69,26 @@ try {
         prerelease = $false
     } | ConvertTo-Json
 
-    $release = Invoke-RestMethod -Uri "$apiBase/releases" -Method Post -Headers $headers -Body $body -ContentType "application/json"
+    $release = Invoke-RestMethod -Uri "$apiBase/releases" -Method Post -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 60
     Write-Host "Berhasil membuat rilis baru: $($release.html_url)" -ForegroundColor Green
 }
 
 # Ambil upload URL bersih
 $uploadUrlTemplate = $release.upload_url -replace '\{\?name,label\}', ''
 
-# 2. Ambil daftar file yang sudah terunggah di rilis ini
+# 2. Ambil daftar file yang sudah terunggah di rilis ini dengan paginasi
 $existingAssets = @{}
-if ($release.assets) {
-    foreach ($asset in $release.assets) {
-        $existingAssets[$asset.name] = $asset.id
+$page = 1
+do {
+    $assetsUri = "$apiBase/releases/$($release.id)/assets?per_page=100&page=$page"
+    $pageAssets = Invoke-RestMethod -Uri $assetsUri -Method Get -Headers $headers -TimeoutSec 60
+    if ($pageAssets) {
+        foreach ($asset in $pageAssets) {
+            $existingAssets[$asset.name] = $asset.id
+        }
+        $page++
     }
-}
+} while ($pageAssets -and $pageAssets.Count -eq 100)
 
 # 3. Unggah seluruh file audio MP3
 $mp3Files = Get-ChildItem -Path $AudioFolder -Filter "*.mp3" | Sort-Object Name
@@ -110,7 +119,7 @@ foreach ($file in $mp3Files) {
     }
 
     try {
-        $uploadResult = Invoke-RestMethod -Uri $uploadUri -Method Post -Headers $uploadHeaders -Body $fileBytes -ErrorAction Stop
+        $uploadResult = Invoke-RestMethod -Uri $uploadUri -Method Post -Headers $uploadHeaders -Body $fileBytes -TimeoutSec 600 -ErrorAction Stop
         Write-Host "   Selesai: $($uploadResult.browser_download_url)" -ForegroundColor Green
     } catch {
         Write-Error "   Gagal mengunggah $fileName : $($_.Exception.Message)"
