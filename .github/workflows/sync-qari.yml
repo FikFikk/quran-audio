@@ -1,0 +1,84 @@
+﻿name: Sync Qari to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      qari_id:
+        description: 'Slug ID Qari (contoh: abdullah-al-juhany)'
+        required: true
+        default: 'abdullah-al-juhany'
+      qari_name:
+        description: 'Nama Lengkap Qari'
+        required: true
+        default: 'Syeikh Abdullah Al-Juhany'
+      tag_name:
+        description: 'Nama Tag Release'
+        required: true
+        default: 'juhany-v1.0.0'
+      cdn_base_url:
+        description: 'Base URL CDN Audio'
+        required: true
+        default: 'https://cdn.equran.id/audio-full/Abdullah-Al-Juhany'
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      # Mengambil kode sumber repositori
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Mengunduh 114 berkas MP3 secara berurutan langsung dari server CDN
+      - name: Download Audio from CDN
+        env:
+          CDN_URL: ${{ inputs.cdn_base_url }}
+        run: |
+          mkdir -p mp3_assets
+          echo "Memulai pengunduhan 114 surah dari $CDN_URL..."
+          for i in $(seq 1 114); do
+            num=$(printf "%03d" "$i")
+            echo "Mengunduh surah ${num}.mp3..."
+            curl -sSL -f "${CDN_URL}/${num}.mp3" -o "mp3_assets/${num}.mp3" || echo "Peringatan: Gagal mengunduh surah ${num}"
+          done
+          count=$(ls -1 mp3_assets/*.mp3 2>/dev/null | wc -l)
+          echo "Total surah berhasil diunduh: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "Kesalahan: Tidak ada berkas audio yang berhasil diunduh."
+            exit 1
+          fi
+
+      # Membuat teks deskripsi rilis dengan blok metadata kala-qari valid
+      - name: Generate Release Notes
+        env:
+          QARI_ID: ${{ inputs.qari_id }}
+          QARI_NAME: ${{ inputs.qari_name }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const id = process.env.QARI_ID;
+            const name = process.env.QARI_NAME;
+            const body = `Murottal ${name} 114 Surah\n\n\`\`\`kala-qari\n${JSON.stringify({ id, name, role: "Surah utuh" }, null, 2)}\n\`\`\`\n`;
+            fs.writeFileSync("release_body.md", body);
+          '
+
+      # Menerbitkan rilis GitHub dan mengunggah aset MP3
+      - name: Publish Release to GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          QARI_NAME: ${{ inputs.qari_name }}
+        run: |
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Rilis ${TAG_NAME} sudah ada, memperbarui aset..."
+            gh release upload "${TAG_NAME}" mp3_assets/*.mp3 --clobber
+            gh release edit "${TAG_NAME}" --notes-file release_body.md
+          else
+            echo "Membuat rilis baru ${TAG_NAME}..."
+            gh release create "${TAG_NAME}" mp3_assets/*.mp3 \
+              --title "Murottal ${QARI_NAME} 114 Surah" \
+              --notes-file release_body.md
+          fi
+          echo "Berhasil mempublikasikan rilis ${TAG_NAME}!"
