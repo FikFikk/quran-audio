@@ -14,7 +14,7 @@ on:
       tag_name:
         description: 'Nama Tag Release'
         required: true
-        default: 'juhany-v1.0.0'
+        default: 'abdullah-al-juhany-v1.0.0'
       cdn_base_url:
         description: 'Base URL CDN Audio'
         required: true
